@@ -81,7 +81,7 @@ static const gchar *get_available_source_port(const pa_source_info *source, cons
     for (i = 0; i < source->n_ports; i++) {
         pa_source_port_info *port = source->ports[i];
 
-        if ((exclude && strcmp(port->name, exclude) == 0) ||
+        if ((exclude && g_strcmp0(port->name, exclude) == 0) ||
             port->available == PA_PORT_AVAILABLE_NO) {
             continue;
         }
@@ -150,7 +150,7 @@ static void process_new_source(CadPulse *self, const pa_source_info *info)
     int i;
 
     prop = pa_proplist_gets(info->proplist, PA_PROP_DEVICE_CLASS);
-    if (prop && strcmp(prop, SINK_CLASS) != 0)
+    if (prop && g_strcmp0(prop, SINK_CLASS) != 0)
         return;
     if (info->monitor_of_sink != PA_INVALID_INDEX)
         return;
@@ -231,7 +231,7 @@ static const gchar *get_available_sink_port(const pa_sink_info *sink, const gcha
     for (i = 0; i < sink->n_ports; i++) {
         pa_sink_port_info *port = sink->ports[i];
 
-        if ((exclude && strcmp(port->name, exclude) == 0) ||
+        if ((exclude && g_strcmp0(port->name, exclude) == 0) ||
             port->available == PA_PORT_AVAILABLE_NO) {
             continue;
         }
@@ -300,7 +300,7 @@ static void process_new_sink(CadPulse *self, const pa_sink_info *info)
     guint i;
 
     prop = pa_proplist_gets(info->proplist, PA_PROP_DEVICE_CLASS);
-    if (prop && strcmp(prop, SINK_CLASS) != 0)
+    if (prop && g_strcmp0(prop, SINK_CLASS) != 0)
         return;
     if (info->card != self->card_id || self->sink_id != -1)
         return;
@@ -318,7 +318,7 @@ static void process_new_sink(CadPulse *self, const pa_sink_info *info)
         switch (port->type) {
           case PA_DEVICE_PORT_TYPE_SPEAKER:
             if (self->speaker_port) {
-                if (strcmp(port->name, self->speaker_port) != 0) {
+                if (g_strcmp0(port->name, self->speaker_port) != 0) {
                     g_free(self->speaker_port);
                     self->speaker_port = g_strdup(port->name);
                 }
@@ -330,7 +330,7 @@ static void process_new_sink(CadPulse *self, const pa_sink_info *info)
           case PA_DEVICE_PORT_TYPE_HANDSET:
           case PA_DEVICE_PORT_TYPE_HEADPHONES:
             if (self->earpiece_port) {
-                if (strcmp(port->name, self->earpiece_port) != 0) {
+                if (g_strcmp0(port->name, self->earpiece_port) != 0) {
                     g_free(self->earpiece_port);
                     self->earpiece_port = g_strdup(port->name);
                 }
@@ -464,11 +464,11 @@ static void init_card_info(pa_context *ctx, const pa_card_info *info, int eol, v
 
     prop = pa_proplist_gets(info->proplist, "alsa.card_name");
     g_debug("CARD: prop %s = %s", "alsa.card_name", prop);
-    if (prop && strstr(prop, CARD_MODEM_NAME) != 0)
+    if (prop && g_str_has_prefix(prop, CARD_MODEM_NAME))
         return;
     prop = pa_proplist_gets(info->proplist, PA_PROP_DEVICE_CLASS);
     g_debug("CARD: prop %s = %s", PA_PROP_DEVICE_CLASS, prop);
-    if (prop && strcmp(prop, CARD_MODEM_CLASS) == 0)
+    if (prop && g_strcmp0(prop, CARD_MODEM_CLASS) == 0)
         return;
 
     for (i = 0; i < info->n_ports; i++) {
@@ -502,7 +502,7 @@ static void init_card_info(pa_context *ctx, const pa_card_info *info, int eol, v
     for (i = 0; i < info->n_profiles; i++) {
         pa_card_profile_info2 *profile = info->profiles2[i];
 
-        if (strstr(profile->name, SND_USE_CASE_VERB_VOICECALL) != NULL) {
+        if (g_str_has_prefix(profile->name, SND_USE_CASE_VERB_VOICECALL)) {
             self->has_voice_profile = TRUE;
             if (info->active_profile2 == profile)
                 self->audio_mode = CALL_AUDIO_MODE_CALL;
@@ -548,7 +548,7 @@ static void init_module_info(pa_context *ctx, const pa_module_info *info, int eo
 
     g_debug("MODULE: idx=%u name='%s'", info->index, info->name);
 
-    if (strcmp(info->name, "module-switch-on-port-available") == 0) {
+    if (g_strcmp0(info->name, "module-switch-on-port-available") == 0) {
         g_debug("MODULE: unloading '%s'", info->name);
         op = pa_context_unload_module(ctx, info->index, NULL, NULL);
         if (op)
@@ -844,12 +844,12 @@ static void set_card_profile(pa_context *ctx, const pa_card_info *info, int eol,
 
     profile = info->active_profile2;
 
-    if (strcmp(profile->name, SND_USE_CASE_VERB_VOICECALL) == 0 && operation->value == 0) {
+    if (g_strcmp0(profile->name, SND_USE_CASE_VERB_VOICECALL) == 0 && operation->value == 0) {
         g_debug("switching to default profile");
         op = pa_context_set_card_profile_by_index(ctx, operation->pulse->card_id,
                                                   SND_USE_CASE_VERB_HIFI,
                                                   operation_complete_cb, operation);
-    } else if (strcmp(profile->name, SND_USE_CASE_VERB_HIFI) == 0 && operation->value == 1) {
+    } else if (g_strcmp0(profile->name, SND_USE_CASE_VERB_HIFI) == 0 && operation->value == 1) {
         g_debug("switching to voice profile");
         op = pa_context_set_card_profile_by_index(ctx, operation->pulse->card_id,
                                                   SND_USE_CASE_VERB_VOICECALL,
@@ -908,7 +908,7 @@ static void set_output_port(pa_context *ctx, const pa_sink_info *info, int eol, 
 
     g_debug("active port is '%s', target port is '%s'", info->active_port->name, target_port);
 
-    if (target_port && strcmp(info->active_port->name, target_port) != 0) {
+    if (target_port && g_strcmp0(info->active_port->name, target_port) != 0) {
         g_debug("switching to target port '%s'", target_port);
         op = pa_context_set_sink_port_by_index(ctx, operation->pulse->sink_id,
                                                target_port,
