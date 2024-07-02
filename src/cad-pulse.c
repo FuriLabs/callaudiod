@@ -18,6 +18,7 @@
 
 #include <string.h>
 #include <stdio.h>
+#include <stdint.h>
 
 #define APPLICATION_NAME "CallAudio"
 #define APPLICATION_ID   "org.mobian-project.CallAudio"
@@ -830,6 +831,7 @@ static void set_card_profile(pa_context *ctx, const pa_card_info *info, int eol,
     CadPulseOperation *operation = data;
     pa_card_profile_info2 *profile;
     pa_operation *op = NULL;
+    const char *target_verb = NULL;
 
     if (eol != 0)
         return;
@@ -844,16 +846,35 @@ static void set_card_profile(pa_context *ctx, const pa_card_info *info, int eol,
 
     profile = info->active_profile2;
 
-    if (g_strcmp0(profile->name, SND_USE_CASE_VERB_VOICECALL) == 0 && operation->value == 0) {
+    if (g_str_has_prefix(profile->name, SND_USE_CASE_VERB_VOICECALL) && operation->value == 0) {
         g_debug("switching to default profile");
-        op = pa_context_set_card_profile_by_index(ctx, operation->pulse->card_id,
-                                                  SND_USE_CASE_VERB_HIFI,
-                                                  operation_complete_cb, operation);
-    } else if (g_strcmp0(profile->name, SND_USE_CASE_VERB_HIFI) == 0 && operation->value == 1) {
+        target_verb = SND_USE_CASE_VERB_HIFI;
+    } else if (g_str_has_prefix(profile->name, SND_USE_CASE_VERB_HIFI) && operation->value == 1) {
         g_debug("switching to voice profile");
-        op = pa_context_set_card_profile_by_index(ctx, operation->pulse->card_id,
-                                                  SND_USE_CASE_VERB_VOICECALL,
-                                                  operation_complete_cb, operation);
+        target_verb = SND_USE_CASE_VERB_VOICECALL;
+    }
+
+    if (target_verb) {
+        uint32_t target_priority = 0;
+        const char *target_profile = NULL;
+
+        for (int i = 0; i < info->n_profiles; i++) {
+            profile = info->profiles2[i];
+
+            if (profile->available &&
+                g_str_has_prefix(profile->name, target_verb) &&
+                profile->priority > target_priority) {
+                target_profile = profile->name;
+                target_priority = profile->priority;
+            }
+        }
+
+        if (target_profile) {
+            g_debug("target profile: '%s'", target_profile);
+            op = pa_context_set_card_profile_by_index(ctx, operation->pulse->card_id,
+                                                      target_profile,
+                                                      operation_complete_cb, operation);
+        }
     }
 
     if (op) {
