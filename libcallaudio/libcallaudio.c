@@ -24,7 +24,7 @@
  *
  *    int main(void)
  *    {
- *       g_autoptr(GError) *err = NULL;
+ *       g_autoptr(GError) err = NULL;
  *       if (call_audio_init(&err)) {
  *         g_error("%s", err->message);
  *       }
@@ -107,14 +107,15 @@ static void select_mode_done(GObject *object, GAsyncResult *result, gpointer dat
 
     ret = call_audio_dbus_call_audio_call_select_mode_finish(proxy, &success,
                                                              result, &error);
-    if (!ret || !success) {
-        g_warning("SelectMode failed with code %d: %s", success, error->message);
-    }
+    if (!ret)
+        g_warning("SelectMode DBus method invocation failed: %s", error->message);
+    else if (!success)
+        g_warning("SelectMode unsuccessful");
 
     g_debug("%s: D-bus call returned %d (success=%d)", __func__, ret, success);
 
     if (async_data && async_data->cb)
-        async_data->cb(ret && success, error, async_data->user_data);
+        async_data->cb(success, error, async_data->user_data);
     g_free(async_data);
 }
 
@@ -165,12 +166,16 @@ gboolean call_audio_select_mode(CallAudioMode mode, GError **error)
 
     ret = call_audio_dbus_call_audio_call_select_mode_sync(_proxy, mode, &success,
                                                            NULL, error);
-    if (error && *error)
-        g_critical("Couldn't set mode %u: %s", mode, (*error)->message);
+    if (!ret) {
+        g_warning("SelectMode DBus method invocation failed: %s", (*error)->message);
+    } else if (!success) {
+        g_warning("SelectMode (%u) unsuccessful", mode);
+        g_set_error_literal(error, G_IO_ERROR, G_IO_ERROR_FAILED, "Operation failed");
+    }
 
     g_debug("SelectMode %s: success=%d", ret ? "succeeded" : "failed", success);
 
-    return (ret && success);
+    return success;
 }
 
 /**
@@ -198,14 +203,15 @@ static void enable_speaker_done(GObject *object, GAsyncResult *result, gpointer 
 
     ret = call_audio_dbus_call_audio_call_enable_speaker_finish(proxy, &success,
                                                                 result, &error);
-    if (!ret || !success) {
-        g_warning("EnableSpeaker failed with code %d: %s", success, error->message);
-    }
+    if (!ret)
+        g_warning("EnableSpeaker DBus method invocation failed: %s", error->message);
+    else if (!success)
+        g_warning("EnableSpeaker unsuccessful");
 
     g_debug("%s: D-bus call returned %d (success=%d)", __func__, ret, success);
 
     if (async_data && async_data->cb)
-        async_data->cb(ret && success, error, async_data->user_data);
+        async_data->cb(success, error, async_data->user_data);
     g_free(async_data);
 }
 
@@ -270,12 +276,16 @@ gboolean call_audio_enable_speaker(gboolean enable, GError **error)
 
     ret = call_audio_dbus_call_audio_call_enable_speaker_sync(_proxy, enable, &success,
                                                               NULL, error);
-    if (error && *error)
-        g_critical("Couldn't enable speaker: %s", (*error)->message);
+    if (!ret) {
+        g_warning("EnableSpeaker DBus method invocation failed: %s", (*error)->message);
+    } else if (!success) {
+        g_warning("EnableSpeaker (%sable) unsuccessful", enable ? "en" : "dis");
+        g_set_error_literal(error, G_IO_ERROR, G_IO_ERROR_FAILED, "Operation failed");
+    }
 
     g_debug("EnableSpeaker %s: success=%d", ret ? "succeeded" : "failed", success);
 
-    return (ret && success);
+    return success;
 }
 
 static void mute_mic_done(GObject *object, GAsyncResult *result, gpointer data)
@@ -283,20 +293,22 @@ static void mute_mic_done(GObject *object, GAsyncResult *result, gpointer data)
     CallAudioDbusCallAudio *proxy = CALL_AUDIO_DBUS_CALL_AUDIO(object);
     CallAudioAsyncData *async_data = data;
     GError *error = NULL;
-    gboolean success = 0;
+    gboolean success = FALSE;
     gboolean ret;
 
     g_return_if_fail(CALL_AUDIO_DBUS_IS_CALL_AUDIO(proxy));
 
     ret = call_audio_dbus_call_audio_call_mute_mic_finish(proxy, &success,
                                                           result, &error);
-    if (!ret || !success)
-        g_warning("MuteMic failed with code %d: %s", success, error->message);
+    if (!ret)
+        g_warning("MuteMic DBus method invocation failed: %s", error->message);
+    else if (!success)
+        g_warning("MuteMic unsuccessful");
 
     g_debug("%s: D-bus call returned %d (success=%d)", __func__, ret, success);
 
     if (async_data && async_data->cb)
-        async_data->cb(ret && success, error, async_data->user_data);
+        async_data->cb(success, error, async_data->user_data);
     g_free(async_data);
 }
 
@@ -347,12 +359,16 @@ gboolean call_audio_mute_mic(gboolean mute, GError **error)
 
     ret = call_audio_dbus_call_audio_call_mute_mic_sync(_proxy, mute, &success,
                                                         NULL, error);
-    if (error && *error)
-        g_critical("Couldn't mute mic: %s", (*error)->message);
+    if (!ret) {
+        g_warning("MuteMic DBus method invocation failed: %s", (*error)->message);
+    } else if (!success) {
+        g_warning("MuteMic (%smute) unsuccessful", mute ? "" : "un");
+        g_set_error_literal(error, G_IO_ERROR, G_IO_ERROR_FAILED, "Operation failed");
+    }
 
     g_debug("MuteMic %s: success=%d", ret ? "succeeded" : "failed", success);
 
-    return (ret && success);
+    return success;
 }
 
 /**

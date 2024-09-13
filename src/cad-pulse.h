@@ -19,7 +19,7 @@ G_BEGIN_DECLS
 G_DECLARE_FINAL_TYPE(CadPulse, cad_pulse, CAD, PULSE, GObject);
 
 CadPulse *cad_pulse_get_default(void);
-void cad_pulse_select_mode(guint mode, CadOperation *op);
+void cad_pulse_select_mode(CallAudioMode mode, CadOperation *op);
 void cad_pulse_enable_speaker(gboolean enable, CadOperation *op);
 void cad_pulse_mute_mic(gboolean mute, CadOperation *op);
 

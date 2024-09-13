@@ -43,14 +43,23 @@ int main (int argc, char *argv[0])
     if (mode == -1 && speaker == -1 && mic == -1)
         status = TRUE;
 
-    if (mode == CALL_AUDIO_MODE_DEFAULT || mode == CALL_AUDIO_MODE_CALL)
-        call_audio_select_mode(mode, NULL);
+    if (mode == CALL_AUDIO_MODE_DEFAULT || mode == CALL_AUDIO_MODE_CALL) {
+        if (!call_audio_select_mode(mode, &err)) {
+            return 1;
+        }
+    }
 
-    if (speaker == 0 || speaker == 1)
-        call_audio_enable_speaker((gboolean)speaker, NULL);
+    if (speaker == 0 || speaker == 1) {
+        if (!call_audio_enable_speaker((gboolean)speaker, &err)) {
+            return 1;
+        }
+    }
 
-    if (mic == 0 || mic == 1)
-        call_audio_mute_mic((gboolean)mic, NULL);
+    if (mic == 0 || mic == 1) {
+        if (!call_audio_mute_mic((gboolean)mic, &err)) {
+            return 1;
+        }
+    }
 
     if (status) {
         CallAudioMode audio_mode = call_audio_get_audio_mode();

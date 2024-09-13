@@ -31,25 +31,22 @@ static void complete_command_cb(CadOperation *op)
     if (!op)
         return;
 
-    if (op->success) {
-        switch (op->type) {
-        case CAD_OPERATION_SELECT_MODE:
-            call_audio_dbus_call_audio_complete_select_mode(op->object, op->invocation, op->success);
-            break;
-        case CAD_OPERATION_ENABLE_SPEAKER:
-            call_audio_dbus_call_audio_complete_enable_speaker(op->object, op->invocation, op->success);
-            break;
-        case CAD_OPERATION_MUTE_MIC:
-            call_audio_dbus_call_audio_complete_mute_mic(op->object, op->invocation, op->success);
-            break;
-        default:
-            g_critical("unknown operation %d", op->type);
-            break;
-        }
-    } else {
+    switch (op->type) {
+    case CAD_OPERATION_SELECT_MODE:
+        call_audio_dbus_call_audio_complete_select_mode(op->object, op->invocation, op->success);
+        break;
+    case CAD_OPERATION_ENABLE_SPEAKER:
+        call_audio_dbus_call_audio_complete_enable_speaker(op->object, op->invocation, op->success);
+        break;
+    case CAD_OPERATION_MUTE_MIC:
+        call_audio_dbus_call_audio_complete_mute_mic(op->object, op->invocation, op->success);
+        break;
+    default:
         g_dbus_method_invocation_return_error(op->invocation, G_DBUS_ERROR,
-                                              G_DBUS_ERROR_FAILED,
-                                              "Operation failed");
+                                              G_DBUS_ERROR_UNKNOWN_METHOD,
+                                              "Unknown operation");
+        g_critical("unknown operation %d", op->type);
+        break;
     }
 }
 
@@ -59,21 +56,19 @@ static gboolean cad_manager_handle_select_mode(CallAudioDbusCallAudio *object,
 {
     CadOperation *op;
 
-    if (mode >= 2) {
+    switch ((CallAudioMode)mode) {
+    case CALL_AUDIO_MODE_DEFAULT:
+    case CALL_AUDIO_MODE_CALL:
+        break;
+    case CALL_AUDIO_MODE_UNKNOWN:
+    default:
         g_dbus_method_invocation_return_error(invocation, G_DBUS_ERROR,
                                               G_DBUS_ERROR_INVALID_ARGS,
                                               "Invalid mode %u", mode);
-        return FALSE;
+        return TRUE;
     }
 
     op = g_new(CadOperation, 1);
-    if (!op) {
-        g_critical("Unable to allocate memory for select mode operation");
-        g_dbus_method_invocation_return_error(invocation, G_DBUS_ERROR,
-                                              G_DBUS_ERROR_NO_MEMORY,
-                                              "Failed to allocate operation");
-        return FALSE;
-    }
 
     op->type = CAD_OPERATION_SELECT_MODE;
     op->value = GUINT_TO_POINTER(mode);
@@ -103,13 +98,6 @@ static gboolean cad_manager_handle_enable_speaker(CallAudioDbusCallAudio *object
     CadOperation *op;
 
     op = g_new(CadOperation, 1);
-    if (!op) {
-        g_critical("Unable to allocate memory for speaker operation");
-        g_dbus_method_invocation_return_error(invocation, G_DBUS_ERROR,
-                                              G_DBUS_ERROR_NO_MEMORY,
-                                              "Failed to allocate operation");
-        return FALSE;
-    }
 
     op->type = CAD_OPERATION_ENABLE_SPEAKER;
     op->value = GUINT_TO_POINTER(enable ? CALL_AUDIO_SPEAKER_ON : CALL_AUDIO_SPEAKER_OFF);
@@ -136,13 +124,6 @@ static gboolean cad_manager_handle_mute_mic(CallAudioDbusCallAudio *object,
     CadOperation *op;
 
     op = g_new(CadOperation, 1);
-    if (!op) {
-        g_critical("Unable to allocate memory for mic operation");
-        g_dbus_method_invocation_return_error(invocation, G_DBUS_ERROR,
-                                              G_DBUS_ERROR_NO_MEMORY,
-                                              "Failed to allocate operation");
-        return FALSE;
-    }
 
     op->type = CAD_OPERATION_MUTE_MIC;
     op->value = GUINT_TO_POINTER(mute ? CALL_AUDIO_MIC_OFF : CALL_AUDIO_MIC_ON);

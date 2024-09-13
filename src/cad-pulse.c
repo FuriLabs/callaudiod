@@ -18,12 +18,12 @@
 
 #include <string.h>
 #include <stdio.h>
+#include <stdint.h>
 
 #define APPLICATION_NAME "CallAudio"
 #define APPLICATION_ID   "org.mobian-project.CallAudio"
 
 #define SINK_CLASS "sound"
-#define CARD_BUS_PATH_PREFIX "platform-"
 #define CARD_FORM_FACTOR "internal"
 #define CARD_MODEM_CLASS "modem"
 #define CARD_MODEM_NAME "Modem"
@@ -88,7 +88,7 @@ static void set_input_port(pa_context *ctx, const pa_source_info *info, int eol,
 
 static void pulseaudio_cleanup(CadPulse *self);
 static gboolean pulseaudio_connect(CadPulse *self);
-static gboolean init_pulseaudio_objects(CadPulse *self);
+static gboolean init_pulseaudio_objects(gpointer data);
 
 /******************************************************************************
  * Source management
@@ -122,7 +122,7 @@ static const gchar *get_available_source_port(const pa_source_info *source, cons
     for (i = 0; i < source->n_ports; i++) {
         pa_source_port_info *port = source->ports[i];
 
-        if ((exclude && strcmp(port->name, exclude) == 0) ||
+        if ((exclude && g_strcmp0(port->name, exclude) == 0) ||
             port->available == PA_PORT_AVAILABLE_NO) {
             continue;
         }
@@ -210,7 +210,7 @@ static void process_new_source(CadPulse *self, const pa_source_info *info)
     int i;
 
     prop = pa_proplist_gets(info->proplist, PA_PROP_DEVICE_CLASS);
-    if (prop && strcmp(prop, SINK_CLASS) != 0)
+    if (prop && g_strcmp0(prop, SINK_CLASS) != 0)
         return;
     if (info->monitor_of_sink != PA_INVALID_INDEX)
         return;
@@ -304,7 +304,7 @@ static const gchar *get_available_sink_port(const pa_sink_info *sink, const gcha
     for (i = 0; i < sink->n_ports; i++) {
         pa_sink_port_info *port = sink->ports[i];
 
-        if ((exclude && strcmp(port->name, exclude) == 0) ||
+        if ((exclude && g_strcmp0(port->name, exclude) == 0) ||
             port->available == PA_PORT_AVAILABLE_NO) {
             continue;
         }
@@ -393,7 +393,7 @@ static void process_new_sink(CadPulse *self, const pa_sink_info *info)
     guint i;
 
     prop = pa_proplist_gets(info->proplist, PA_PROP_DEVICE_CLASS);
-    if (prop && strcmp(prop, SINK_CLASS) != 0)
+    if (prop && g_strcmp0(prop, SINK_CLASS) != 0)
         return;
     if (info->card != self->card_id || self->sink_id != -1)
         return;
@@ -414,28 +414,40 @@ static void process_new_sink(CadPulse *self, const pa_sink_info *info)
         pa_sink_port_info *port = info->ports[i];
 
 #ifdef WITH_DROID_SUPPORT
-        if ((self->sink_is_droid && strcmp(port->name, DROID_OUTPUT_PORT_SPEAKER) == 0) ||
-            (!self->sink_is_droid && strstr(port->name, SND_USE_CASE_DEV_SPEAKER) != 0)) {
+        pa_device_port_type_t port_type;
+        if (self->sink_is_droid && strcmp(port->name, DROID_OUTPUT_PORT_SPEAKER) == 0) {
+            port_type = PA_DEVICE_PORT_TYPE_SPEAKER;
+        } else {
+            port_type = port->type;
+        }
+        switch (port_type) {
 #else
-        if (strstr(port->name, SND_USE_CASE_DEV_SPEAKER) != NULL) {
+        switch (port->type) {
 #endif /* WITH_DROID_SUPPORT */
+          case PA_DEVICE_PORT_TYPE_SPEAKER:
             if (self->speaker_port) {
-                if (strcmp(port->name, self->speaker_port) != 0) {
+                if (g_strcmp0(port->name, self->speaker_port) != 0) {
                     g_free(self->speaker_port);
                     self->speaker_port = g_strdup(port->name);
                 }
             } else {
                 self->speaker_port = g_strdup(port->name);
             }
-        } else if (strstr(port->name, SND_USE_CASE_DEV_EARPIECE) != NULL) {
+            break;
+          case PA_DEVICE_PORT_TYPE_EARPIECE:
+          case PA_DEVICE_PORT_TYPE_HANDSET:
+          case PA_DEVICE_PORT_TYPE_HEADPHONES:
             if (self->earpiece_port) {
-                if (strcmp(port->name, self->earpiece_port) != 0) {
+                if (g_strcmp0(port->name, self->earpiece_port) != 0) {
                     g_free(self->earpiece_port);
                     self->earpiece_port = g_strdup(port->name);
                 }
             } else {
                 self->earpiece_port = g_strdup(port->name);
             }
+            break;
+          default:
+            break;
         }
 
         if (port->available != PA_PORT_AVAILABLE_UNKNOWN) {
@@ -512,6 +524,7 @@ static void init_sink_info(pa_context *ctx, const pa_sink_info *info, int eol, v
                 g_object_set(self->manager, "audio-mode", self->audio_mode, NULL);
             }
             break;
+        case CALL_AUDIO_MODE_DEFAULT:
         default:
             break;
         }
@@ -551,8 +564,7 @@ static void init_card_info(pa_context *ctx, const pa_card_info *info, int eol, v
 
     if (eol != 0) {
         if (self->card_id < 0) {
-            g_critical("No suitable card found, retrying in 3s...");
-            g_timeout_add_seconds(3, G_SOURCE_FUNC(init_pulseaudio_objects), self);
+            g_critical("No suitable card found, stopping here...");
         }
         return;
     }
@@ -562,21 +574,18 @@ static void init_card_info(pa_context *ctx, const pa_card_info *info, int eol, v
         return;
     }
 
-    prop = pa_proplist_gets(info->proplist, PA_PROP_DEVICE_BUS_PATH);
-    if (prop && !g_str_has_prefix(prop, CARD_BUS_PATH_PREFIX))
-        return;
-    prop = pa_proplist_gets(info->proplist, PA_PROP_DEVICE_FORM_FACTOR);
-    if (prop && strcmp(prop, CARD_FORM_FACTOR) != 0)
-        return;
     prop = pa_proplist_gets(info->proplist, "alsa.card_name");
-    if (prop && strcmp(prop, CARD_MODEM_NAME) == 0)
+    g_debug("CARD: prop %s = %s", "alsa.card_name", prop);
+    if (prop && g_str_has_prefix(prop, CARD_MODEM_NAME))
         return;
     prop = pa_proplist_gets(info->proplist, PA_PROP_DEVICE_CLASS);
-    if (prop && strcmp(prop, CARD_MODEM_CLASS) == 0)
+    g_debug("CARD: prop %s = %s", PA_PROP_DEVICE_CLASS, prop);
+    if (prop && g_strcmp0(prop, CARD_MODEM_CLASS) == 0)
         return;
 
     for (i = 0; i < info->n_ports; i++) {
         pa_card_port_info *port = info->ports[i];
+        g_debug("CARD: port %d/%d, name=%s", i, info->n_ports-1, port->name);
 
 #ifdef WITH_DROID_SUPPORT
         if (strstr(port->name, DROID_OUTPUT_PORT_SPEAKER) != NULL) {
@@ -587,11 +596,17 @@ static void init_card_info(pa_context *ctx, const pa_card_info *info, int eol, v
         }
 #endif /* WITH_DROID_SUPPORT */
 
-        if (strstr(port->name, SND_USE_CASE_DEV_SPEAKER) != NULL) {
+        switch (port->type) {
+          case PA_DEVICE_PORT_TYPE_SPEAKER:
             has_speaker = TRUE;
-        } else if (strstr(port->name, SND_USE_CASE_DEV_EARPIECE) != NULL ||
-                   strstr(port->name, SND_USE_CASE_DEV_HANDSET)  != NULL) {
+            break;
+          case PA_DEVICE_PORT_TYPE_EARPIECE:
+          case PA_DEVICE_PORT_TYPE_HANDSET:
+          case PA_DEVICE_PORT_TYPE_HEADPHONES:
             has_earpiece = TRUE;
+            break;
+          default:
+            break;
         }
     }
 
@@ -609,9 +624,9 @@ static void init_card_info(pa_context *ctx, const pa_card_info *info, int eol, v
         pa_card_profile_info2 *profile = info->profiles2[i];
 
 #ifdef WITH_DROID_SUPPORT
-        if (strstr(profile->name, SND_USE_CASE_VERB_VOICECALL) != NULL || strstr(profile->name, DROID_PROFILE_VOICECALL) != NULL) {
+        if (g_str_has_prefix(profile->name, SND_USE_CASE_VERB_VOICECALL) || strstr(profile->name, DROID_PROFILE_VOICECALL) != NULL) {
 #else
-        if (strstr(profile->name, SND_USE_CASE_VERB_VOICECALL) != NULL) {
+        if (g_str_has_prefix(profile->name, SND_USE_CASE_VERB_VOICECALL))  {
 #endif /* WITH_DROID_SUPPORT */
             self->has_voice_profile = TRUE;
             if (info->active_profile2 == profile)
@@ -658,7 +673,7 @@ static void init_module_info(pa_context *ctx, const pa_module_info *info, int eo
 
     g_debug("MODULE: idx=%u name='%s'", info->index, info->name);
 
-    if (strcmp(info->name, "module-switch-on-port-available") == 0) {
+    if (g_strcmp0(info->name, "module-switch-on-port-available") == 0) {
         g_debug("MODULE: unloading '%s'", info->name);
         op = pa_context_unload_module(ctx, info->index, NULL, NULL);
         if (op)
@@ -666,8 +681,9 @@ static void init_module_info(pa_context *ctx, const pa_module_info *info, int eo
     }
 }
 
-static gboolean init_pulseaudio_objects(CadPulse *self)
+static gboolean init_pulseaudio_objects(gpointer data)
 {
+    CadPulse *self = data;
     pa_operation *op;
 
     self->card_id = self->sink_id = self->source_id = -1;
@@ -717,7 +733,10 @@ static void changed_cb(pa_context *ctx, pa_subscription_event_type_t type, uint3
         }
         break;
     case PA_SUBSCRIPTION_EVENT_CARD:
-        if (idx == self->card_id && kind == PA_SUBSCRIPTION_EVENT_CHANGE) {
+        if (self->card_id < 0 && kind == PA_SUBSCRIPTION_EVENT_NEW) {
+            g_debug("card %u added, but no valid card detected yet, retrying...", idx);
+            g_idle_add(init_pulseaudio_objects, self);
+        } else if (idx == self->card_id && kind == PA_SUBSCRIPTION_EVENT_CHANGE) {
             g_debug("card %u changed", idx);
             if (self->sink_id != -1) {
                 op = pa_context_get_sink_info_by_index(ctx, self->sink_id,
@@ -763,8 +782,10 @@ static void pulse_state_cb(pa_context *ctx, void *data)
                              PA_SUBSCRIPTION_MASK_SINK  | PA_SUBSCRIPTION_MASK_SOURCE | PA_SUBSCRIPTION_MASK_CARD,
                              NULL, self);
         g_debug("PA is ready, initializing cards list");
-        init_pulseaudio_objects(self);
+        g_idle_add(init_pulseaudio_objects, self);
         break;
+    default:
+        g_return_if_reached();
     }
 }
 
@@ -1022,9 +1043,8 @@ static void set_card_profile(pa_context *ctx, const pa_card_info *info, int eol,
     CadPulseOperation *operation = data;
     pa_card_profile_info2 *profile;
     pa_operation *op = NULL;
-    gchar *default_profile;
-    gchar *voicecall_profile;
     pa_context_success_cb_t complete_callback;
+    const char *target_verb = NULL;
 
     if (eol != 0)
         return;
@@ -1037,32 +1057,51 @@ static void set_card_profile(pa_context *ctx, const pa_card_info *info, int eol,
     if (info->index != operation->pulse->card_id)
         return;
 
-#ifdef WITH_DROID_SUPPORT
-    default_profile = operation->pulse->sink_is_droid ?
-                          DROID_PROFILE_HIFI :
-                          SND_USE_CASE_VERB_HIFI;
-    voicecall_profile = operation->pulse->sink_is_droid ?
-                            DROID_PROFILE_VOICECALL :
-                            SND_USE_CASE_VERB_VOICECALL;
-    complete_callback = droid_mode_change_complete_cb;
-#else
-    default_profile = SND_USE_CASE_VERB_HIFI;
-    voicecall_profile = SND_USE_CASE_VERB_VOICECALL;
-    complete_callback = operation_complete_cb;
-#endif /* WITH_DROID_SUPPORT */
-
     profile = info->active_profile2;
 
-    if (strcmp(profile->name, voicecall_profile) == 0 && operation->value == 0) {
+#ifdef WITH_DROID_SUPPORT
+    if (operation->pulse->sink_is_droid && strcmp(profile->name, DROID_PROFILE_VOICECALL) == 0 && operation->value == 0) {
         g_debug("switching to default profile");
         op = pa_context_set_card_profile_by_index(ctx, operation->pulse->card_id,
-                                                  default_profile,
-                                                  complete_callback, operation);
-    } else if (strcmp(profile->name, default_profile) == 0 && operation->value == 1) {
+                                                  DROID_PROFILE_HIFI,
+                                                  droid_mode_change_complete_cb, operation);
+    } else if (operation->pulse->sink_is_droid && strcmp(profile->name, DROID_PROFILE_HIFI) == 0 && operation->value == 1) {
         g_debug("switching to voice profile");
         op = pa_context_set_card_profile_by_index(ctx, operation->pulse->card_id,
-                                                  voicecall_profile,
-                                                  complete_callback, operation);
+                                                  DROID_PROFILE_VOICECALL,
+                                                  droid_mode_change_complete_cb, operation);
+    }
+#endif /* WITH_DROID_SUPPORT */
+
+    if (g_str_has_prefix(profile->name, SND_USE_CASE_VERB_VOICECALL) && operation->value == 0) {
+        g_debug("switching to default profile");
+        target_verb = SND_USE_CASE_VERB_HIFI;
+    } else if (g_str_has_prefix(profile->name, SND_USE_CASE_VERB_HIFI) && operation->value == 1) {
+        g_debug("switching to voice profile");
+        target_verb = SND_USE_CASE_VERB_VOICECALL;
+    }
+
+    if (target_verb) {
+        uint32_t target_priority = 0;
+        const char *target_profile = NULL;
+
+        for (int i = 0; i < info->n_profiles; i++) {
+            profile = info->profiles2[i];
+
+            if (profile->available &&
+                g_str_has_prefix(profile->name, target_verb) &&
+                profile->priority > target_priority) {
+                target_profile = profile->name;
+                target_priority = profile->priority;
+            }
+        }
+
+        if (target_profile) {
+            g_debug("target profile: '%s'", target_profile);
+            op = pa_context_set_card_profile_by_index(ctx, operation->pulse->card_id,
+                                                      target_profile,
+                                                      operation_complete_cb, operation);
+        }
     }
 
     if (op) {
@@ -1136,7 +1175,7 @@ static void set_output_port(pa_context *ctx, const pa_sink_info *info, int eol, 
 
     g_debug("active port is '%s', target port is '%s'", info->active_port->name, target_port);
 
-    if (strcmp(info->active_port->name, target_port) != 0) {
+    if (target_port && g_strcmp0(info->active_port->name, target_port) != 0) {
         g_debug("switching to target port '%s'", target_port);
         op = pa_context_set_sink_port_by_index(ctx, operation->pulse->sink_id,
                                                target_port,
@@ -1194,18 +1233,14 @@ static void set_input_port(pa_context *ctx, const pa_source_info *info, int eol,
  * @mode:
  * @cad_op:
  *
- * */
-void cad_pulse_select_mode(guint mode, CadOperation *cad_op)
+ */
+void cad_pulse_select_mode(CallAudioMode mode, CadOperation *cad_op)
 {
     CadPulseOperation *operation = g_new(CadPulseOperation, 1);
     pa_operation *op = NULL;
 
     if (!cad_op) {
         g_critical("%s: no callaudiod operation", __func__);
-        goto error;
-    }
-    if (!operation) {
-        g_critical("%s: unable to allocate memory", __func__);
         goto error;
     }
 
@@ -1267,7 +1302,8 @@ void cad_pulse_select_mode(guint mode, CadOperation *cad_op)
 error:
     if (cad_op) {
         cad_op->success = FALSE;
-        cad_op->callback(cad_op);
+        if (cad_op->callback)
+            cad_op->callback(cad_op);
     }
     if (operation)
         free(operation);
@@ -1280,10 +1316,6 @@ void cad_pulse_enable_speaker(gboolean enable, CadOperation *cad_op)
 
     if (!cad_op) {
         g_critical("%s: no callaudiod operation", __func__);
-        goto error;
-    }
-    if (!operation) {
-        g_critical("%s: unable to allocate memory", __func__);
         goto error;
     }
 
@@ -1313,7 +1345,8 @@ void cad_pulse_enable_speaker(gboolean enable, CadOperation *cad_op)
 error:
     if (cad_op) {
         cad_op->success = FALSE;
-        cad_op->callback(cad_op);
+        if (cad_op->callback)
+            cad_op->callback(cad_op);
     }
     if (operation)
         free(operation);
@@ -1326,10 +1359,6 @@ void cad_pulse_mute_mic(gboolean mute, CadOperation *cad_op)
 
     if (!cad_op) {
         g_critical("%s: no callaudiod operation", __func__);
-        goto error;
-    }
-    if (!operation) {
-        g_critical("%s: unable to allocate memory", __func__);
         goto error;
     }
 
@@ -1372,7 +1401,8 @@ void cad_pulse_mute_mic(gboolean mute, CadOperation *cad_op)
 error:
     if (cad_op) {
         cad_op->success = FALSE;
-        cad_op->callback(cad_op);
+        if (cad_op->callback)
+            cad_op->callback(cad_op);
     }
     if (operation)
         free(operation);
